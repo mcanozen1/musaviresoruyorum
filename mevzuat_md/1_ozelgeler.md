@@ -1,2 +1,2 @@
-# GİB Ozelgeler Tam Arşivi
+# GİB Ozelgeler Arşivi
 

@@ -1,2 +1,2 @@
-# GİB Kanunlar Tam Arşivi
+# GİB Kanunlar Arşivi
 

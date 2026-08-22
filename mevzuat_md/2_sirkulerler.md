@@ -1,2 +1,2 @@
-# GİB Sirkulerler Tam Arşivi
+# GİB Sirkulerler Arşivi
 

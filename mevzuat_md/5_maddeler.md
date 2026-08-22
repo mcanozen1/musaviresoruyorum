@@ -1,2 +1,2 @@
-# GİB Maddeler Tam Arşivi
+# GİB Maddeler Arşivi
 

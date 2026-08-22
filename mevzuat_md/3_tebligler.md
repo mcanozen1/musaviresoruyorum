@@ -1,2 +1,2 @@
-# GİB Tebligler Tam Arşivi
+# GİB Tebligler Arşivi
 
