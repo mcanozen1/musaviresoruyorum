@@ -1,0 +1,97 @@
+import os
+import time
+import re
+from playwright.sync_api import sync_playwright
+
+SEARCH_URL = "https://gib.gov.tr/mevzuat/arama?tur=vergi-mevzuati&ktype=99&kanun-turu=kanun"
+
+def sanitize_filename(name):
+    """Dosya adındaki geçersiz karakterleri temizler."""
+    name = re.sub(r'[\\/*?:"<>|]', "", name)
+    name = name.replace(" ", "_").strip()
+    return name[:100]
+
+def run():
+    os.makedirs("kanunlar_pdf", exist_ok=True)
+    
+    with sync_playwright() as p:
+        # İndirmeleri kabul eden gerçek Chromium tarayıcısı
+        browser = p.chromium.launch(headless=True)
+        context = browser.new_context(
+            accept_downloads=True,
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+            locale="tr-TR"
+        )
+        page = context.new_page()
+
+        print("1. Kanunlar Arama Sayfası Açılıyor...")
+        page.goto(SEARCH_URL, wait_until="networkidle", timeout=35000)
+        time.sleep(3)
+
+        # Arama sayfasındaki tüm kanun linklerini topla
+        kanun_links = page.evaluate("""() => {
+            const results = [];
+            const anchors = document.querySelectorAll('a[href*="/mevzuat/kanun/"]');
+            anchors.forEach(a => {
+                const href = a.getAttribute('href') || '';
+                const title = a.innerText.trim();
+                if (title.length > 10 && !href.includes('/mevzuat/arama') && !href.startsWith('javascript')) {
+                    results.push({
+                        title: title,
+                        url: href.startsWith('http') ? href : 'https://gib.gov.tr' + href
+                    });
+                }
+            });
+            return results;
+        }""")
+
+        # Tekilleştirme
+        unique_kanunlar = []
+        seen = set()
+        for k in kanun_links:
+            if k["url"] not in seen:
+                seen.add(k["url"])
+                unique_kanunlar.append(k)
+
+        print(f"Toplam {len(unique_kanunlar)} adet kanun bulundu. İndirmeler başlatılıyor...\n")
+
+        for idx, item in enumerate(unique_kanunlar):
+            kanun_adi = sanitize_filename(item["title"])
+            hedef_dosya = f"kanunlar_pdf/{idx+1}_{kanun_adi}.pdf"
+            print(f"[{idx+1}/{len(unique_kanunlar)}] Açılıyor: {item['title']}")
+            print(f"  -> Link: {item['url']}")
+
+            try:
+                detail_page = context.new_page()
+                detail_page.goto(item["url"], wait_until="networkidle", timeout=30000)
+                time.sleep(2)
+
+                # "Sayfayı İndir" butonunu bul ve tıkla (İndirme olayını dinle)
+                indir_butonu = detail_page.locator("text='Sayfayı İndir', text='İndir', text='PDF İndir', button:has-text('Sayfayı İndir'), a:has-text('Sayfayı İndir'), [title*='İndir'], [aria-label*='İndir']").first
+
+                if indir_butonu.count() > 0:
+                    with detail_page.expect_download(timeout=20000) as download_info:
+                        indir_butonu.click()
+                    
+                    download = download_info.value
+                    download.save_as(hedef_dosya)
+                    print(f"  ✓ 'Sayfayı İndir' butonuna tıklandı ve PDF kaydedildi: {hedef_dosya}\n")
+                else:
+                    # Eğer buton bulunamazsa doğrudan sayfanın orijinal PDF çıktısını al
+                    print("  ! 'Sayfayı İndir' butonu bulunamadı, doğrudan PDF çıktısı alınıyor...")
+                    detail_page.pdf(path=hedef_dosya, format="A4", print_background=True)
+                    print(f"  ✓ PDF kaydedildi: {hedef_dosya}\n")
+
+                detail_page.close()
+                time.sleep(1)
+
+            except Exception as e:
+                print(f"  ✗ Hata oluştu ({item['title']}): {e}\n")
+                if 'detail_page' in locals() and not detail_page.is_closed():
+                    detail_page.close()
+
+        browser.close()
+        print("TÜM KANUN PDF'LERİ İNDİRİLDİ VE HAZIRLANDI!")
+
+if __name__ == "__main__":
+    run()
