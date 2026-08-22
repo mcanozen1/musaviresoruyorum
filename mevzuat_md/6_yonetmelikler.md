@@ -1,0 +1,2 @@
+# GİB Yonetmelikler Tam Arşivi
+
