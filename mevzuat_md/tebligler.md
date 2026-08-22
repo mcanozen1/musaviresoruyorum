@@ -1,2 +1,0 @@
-# GİB Tebligler Arşivi
-
