@@ -1,0 +1,40 @@
+name: GIB Kanun PDF Indirici
+
+on:
+  workflow_dispatch: # Actions sekmesinden manuel tek tıkla başlatmak için
+
+permissions:
+  contents: write # İnen PDF'leri depoya geri yükleyebilmek için yazma izni
+
+jobs:
+  download-and-commit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Depoyu Klonla
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Python Kur
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Playwright ve Tarayıcı Motorunu Kur
+        run: |
+          python -m pip install --upgrade pip
+          pip install playwright requests beautifulsoup4
+          playwright install --with-deps chromium
+
+      - name: Butonlara Tıklayıp PDF'leri İndir
+        run: |
+          python download_kanunlar.py
+
+      - name: İnen PDF Dosyalarını Depoya Kaydet (Git Push)
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git add kanunlar_pdf/
+          git diff --staged --quiet || (git commit -m "GİB Resmi Kanun PDF'leri İndirildi ve Eklendi" && git push origin HEAD)
