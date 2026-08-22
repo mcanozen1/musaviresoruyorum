@@ -5,56 +5,78 @@ import os
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
-# Bağlantı kopmalarına karşı dayanıklı oturum (Session)
+# Bağlantı hatalarına karşı otomatik yeniden deneme
 session = requests.Session()
 retries = Retry(total=5, backoff_factor=1, status_forcelist=[500, 502, 503, 504, 429])
 session.mount("https://", HTTPAdapter(max_retries=retries))
 
 HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+    "Accept-Language": "tr-TR,tr;q=0.9,en-US;q=0.8,en;q=0.7",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
 }
 
-# GİB'deki 6 Kategorinin Tamamı (%100 Kapsam)
 KATEGORILER = {
     "ozelgeler": {
         "url": "https://gib.gov.tr/mevzuat/arama?tur=vergi-mevzuati&ktype=99&kanun-turu=ozelge",
         "dosya": "mevzuat_md/1_ozelgeler.md",
-        "max_sayfa": 370  # 18.358 Özelgenin tamamı (368 sayfa)
+        "max_sayfa": 370
     },
     "sirkulerler": {
         "url": "https://gib.gov.tr/mevzuat/arama?tur=vergi-mevzuati&ktype=99&kanun-turu=sirkuler",
         "dosya": "mevzuat_md/2_sirkulerler.md",
-        "max_sayfa": 20   # 588 Sirkülerin tamamı
+        "max_sayfa": 20
     },
     "tebligler": {
         "url": "https://gib.gov.tr/mevzuat/arama?tur=vergi-mevzuati&ktype=99&kanun-turu=teblig",
         "dosya": "mevzuat_md/3_tebligler.md",
-        "max_sayfa": 60   # 2.490 Tebliğin tamamı
+        "max_sayfa": 60
     },
     "kanunlar": {
         "url": "https://gib.gov.tr/mevzuat/arama?tur=vergi-mevzuati&ktype=99&kanun-turu=kanun",
         "dosya": "mevzuat_md/4_kanunlar.md",
-        "max_sayfa": 10   # 221 Kanunun tamamı
+        "max_sayfa": 10
     },
     "maddeler": {
         "url": "https://gib.gov.tr/mevzuat/arama?tur=vergi-mevzuati&ktype=99&kanun-turu=madde",
         "dosya": "mevzuat_md/5_maddeler.md",
-        "max_sayfa": 150  # 6.998 Maddenin tamamı
+        "max_sayfa": 150
     },
     "yonetmelikler": {
         "url": "https://gib.gov.tr/mevzuat/arama?tur=vergi-mevzuati&ktype=99&kanun-turu=yönetmelik",
         "dosya": "mevzuat_md/6_yonetmelikler.md",
-        "max_sayfa": 5    # 66 Yönetmeliğin tamamı
+        "max_sayfa": 5
     }
 }
 
-def get_detail_text(url):
-    """Detay sayfasına girip tam karar ve gerekçe metnini alır."""
+def extract_mevzuat_links(soup):
+    """Sayfadaki tüm mevzuat detay linklerini sınıf farkı gözetmeksizin çeker."""
+    links = []
+    seen = set()
+    for a in soup.find_all("a", href=True):
+        href = a["href"].strip()
+        text = a.get_text(separator=" ", strip=True)
+        
+        # Sadece gerçek mevzuat detay bağlantılarını filtrele
+        if "/mevzuat/" in href and not href.endswith("/mevzuat/arama") and not href.startswith("javascript"):
+            if len(text) >= 12 and not any(skip in text.lower() for skip in ["arama sonuçları", "kurumsal", "iletişim", "e-işlemler", "başa dön", "erişilebilirlik", "dijital vergi dairesi"]):
+                full_url = href if href.startswith("http") else f"https://gib.gov.tr{href}"
+                if full_url not in seen:
+                    seen.add(full_url)
+                    links.append((text, full_url))
+    return links
+
+def get_detail_content(url):
+    """Detay sayfasından sadece karar metnini çeker, menüleri temizler."""
     try:
         r = session.get(url, headers=HEADERS, timeout=12)
         if r.status_code == 200:
             soup = BeautifulSoup(r.text, "html.parser")
-            body = soup.select_one(".field--name-body, .mevzuat-icerik, article, main")
+            # Gereksiz menü, footer ve scriptleri sil
+            for tag in soup(["header", "footer", "nav", "script", "style"]):
+                tag.decompose()
+            
+            body = soup.select_one(".field--name-body, .mevzuat-icerik, article, main, #main-content, .region-content")
             if body:
                 return body.get_text(separator="\n\n", strip=True)
             return soup.get_text(separator="\n\n", strip=True)
@@ -81,33 +103,26 @@ def main():
                 try:
                     res = session.get(target_url, headers=HEADERS, timeout=15)
                     soup = BeautifulSoup(res.text, "html.parser")
-                    items = soup.select(".views-row, .mevzuat-item, table tbody tr")
+                    items = extract_mevzuat_links(soup)
                     
                     if not items:
-                        print(f"[{kat_adi}] Bu kategorideki tüm sayfalar tamamlandı.")
+                        print(f"[{kat_adi}] Bu sayfada başka kayıt bulunamadı, kategori tamamlandı.")
                         break
                         
-                    for item in items:
-                        a_tag = item.find("a")
-                        if not a_tag:
-                            continue
-                            
-                        title = a_tag.get_text(strip=True)
-                        href = a_tag.get("href", "")
-                        full_url = href if href.startswith("http") else f"https://gib.gov.tr{href}"
+                    print(f"  -> Bu sayfada {len(items)} adet mevzuat kaydı bulundu. İçerikler çekiliyor...")
+                    
+                    for title, full_url in items:
+                        content = get_detail_content(full_url)
                         
-                        # Detay metnini al
-                        content = get_detail_text(full_url)
-                        
-                        # Markdown formatında anlık olarak dosyaya yaz
+                        # Markdown formatında yaz ve diske kaydet
                         f.write(f"## {title}\n\n")
                         f.write(f"- **Kaynak Bağlantısı:** {full_url}\n\n")
                         f.write(f"### Metin / Karar Hükmü:\n{content}\n\n")
                         f.write("---\n\n")
-                        f.flush() # Veri kaybını önlemek için anında diske yaz
+                        f.flush()
                         
                         toplam_kayit += 1
-                        time.sleep(0.2) # Sunucuyu yormamak için kısa bekleme
+                        time.sleep(0.15)
                         
                 except Exception as e:
                     print(f"Hata oluştu ({kat_adi} - Sayfa {page + 1}): {e}")
